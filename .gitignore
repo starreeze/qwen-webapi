@@ -1,0 +1,13 @@
+__pycache__
+dist
+build
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.egg-info
+
+/token.txt
+/tests

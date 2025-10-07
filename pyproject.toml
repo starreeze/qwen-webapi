@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen-webapi"
+version = "0.1.0"
+description = "OpenAI-compatible API proxy for chat.qwen.ai with Flask server and Python API"
+readme = "readme.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-only" }
+authors = [
+    { name = "Starreeze" }
+]
+keywords = ["qwen", "api", "proxy", "openai", "chat", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "flask>=2.0.0",
+    "flask-cors>=3.0.0",
+    "requests>=2.25.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311", "py312"]
