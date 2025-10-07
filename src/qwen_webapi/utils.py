@@ -68,10 +68,10 @@ def configure_logging(
     logging.basicConfig(**kwargs)
 
 
-def load_config() -> AppConfig:
+def load_config(token="") -> AppConfig:
     """Load configuration from environment variables."""
 
-    auth_token = os.getenv("QWEN_AUTH_TOKEN") or open("token.txt", "r").read().strip()
+    auth_token = token or os.getenv("QWEN_AUTH_TOKEN") or open("token.txt", "r").read().strip()
     base_url = os.getenv("QWEN_BASE_URL", "https://chat.qwen.ai")
     log_level = _parse_log_level(os.getenv("QWEN_LOG_LEVEL"))
     log_format = os.getenv("QWEN_LOG_FORMAT", DEFAULT_LOG_FORMAT)

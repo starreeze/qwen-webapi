@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 _MANAGER: RequestManager | None = None
 
 
-def _ensure_manager() -> RequestManager:
+def _ensure_manager(token="") -> RequestManager:
     global _MANAGER
     if _MANAGER is not None:
         return _MANAGER
 
-    config = load_config()
+    config = load_config(token)
     if not config.auth_token:
         raise ConfigurationError("QWEN_AUTH_TOKEN environment variable is not set")
 
@@ -40,12 +40,13 @@ class QwenApi:
 
     def __init__(
         self,
-        model: str = "qwen",
+        model="qwen",
         enable_thinking: bool = False,
         thinking_budget: int | None = None,
+        token="",
         **default_kwargs: Any,
     ) -> None:
-        self._manager = _ensure_manager()
+        self._manager = _ensure_manager(token)
         self._model = model
         self._default_kwargs = default_kwargs | {"enable_thinking": enable_thinking}
         if thinking_budget is not None:
