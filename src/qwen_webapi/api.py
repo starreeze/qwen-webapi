@@ -76,9 +76,7 @@ class QwenApi:
         if thinking_budget is not None:
             request_body["thinking_budget"] = thinking_budget
 
-        is_streaming, payload = self._manager.chat_completions(request_body)
-        if is_streaming:
-            raise QwenAPIError("QwenApi does not support streaming responses")
+        payload = self._manager.chat_completions(request_body)
 
         if not isinstance(payload, dict):
             raise QwenAPIError("Unexpected response payload")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Tuple
 
-from flask import Flask, Response, jsonify, request, stream_with_context
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 from .core import RequestManager
@@ -82,7 +82,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
 
         try:
-            is_streaming, payload = manager.chat_completions(openai_request)
+            payload = manager.chat_completions(openai_request)
         except QwenAPIError as exc:
             logger.exception("chat completion failed")
             return (
@@ -92,9 +92,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 500,
             )
 
-        if is_streaming:
-            assert hasattr(payload, "__iter__")
-            return Response(stream_with_context(payload), content_type="text/event-stream")  # type: ignore
         return jsonify(payload)
 
     @app.route("/v1/chats/<chat_id>", methods=["DELETE"])

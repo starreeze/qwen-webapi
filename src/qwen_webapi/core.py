@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import base64
 import copy
-import json
 import logging
 import mimetypes
 import time
 import uuid
 from pathlib import Path
-from typing import Iterator, Optional, Tuple
+from typing import Optional, Tuple
 
 import requests
 
@@ -266,7 +265,7 @@ class RequestManager:
             raise QwenAPIError(f"Failed to delete chat {chat_id}: {exc}") from exc
 
     @instrument_call("request_manager.chat_completions")
-    def chat_completions(self, request_body: dict) -> Tuple[bool, Iterator[str] | dict]:
+    def chat_completions(self, request_body: dict) -> dict:
         messages = request_body["messages"]
         if not (isinstance(messages, list) and len(messages) == 1):
             raise QwenAPIError("Invalid messages format. Only single user message is supported.")
@@ -276,7 +275,6 @@ class RequestManager:
         user_input, image_files = self._parse_message_content(user_message)
 
         model_name = request_body.get("model", "qwen3")
-        stream = bool(request_body.get("stream", False))
         enable_thinking = request_body.get("enable_thinking", False)
         thinking_budget = request_body.get("thinking_budget")
 
@@ -286,10 +284,7 @@ class RequestManager:
         feature_config = self._build_feature_config(model_id, enable_thinking, thinking_budget)
         payload = self._build_payload(chat_id, model_id, user_input, feature_config, image_files)
 
-        if stream:
-            return True, self._stream_chat(chat_id, model_name, payload)
-
-        return False, self._non_stream_chat(chat_id, model_name, payload)
+        return self._complete_chat(chat_id, model_name, payload)
 
     def _parse_message_content(self, user_message: dict) -> Tuple[str, list[dict]]:
         """Parse user message and extract text content and images."""
@@ -446,135 +441,51 @@ class RequestManager:
     # ------------------------------------------------------------------
     # Internal chat helpers
 
-    def _stream_chat(self, chat_id: str, model_name: str, payload: dict) -> Iterator[str]:
-        assistant_content = ""
+    def _complete_chat(self, chat_id: str, model_name: str, payload: dict) -> dict:
+        """Send chat request and fetch final response using GET."""
+        # Step 1: POST with stream=True and consume the entire stream to ensure completion
+        logger.debug("Posting chat completion request for chat_id=%s", chat_id)
+        with self._post(
+            f"/api/v2/chat/completions?chat_id={chat_id}",
+            payload,
+            stream=True,
+            headers={"x-accel-buffering": "no"},
+        ) as response:
+            # Consume the entire stream to ensure the upstream completes
+            for _ in response.iter_lines(decode_unicode=True):
+                pass
+            logger.debug("Stream fully consumed for chat_id=%s", chat_id)
+
+        # Step 2: GET the final chat content
+        logger.debug("Fetching final chat content for chat_id=%s", chat_id)
+        chat_data = self._get(f"/api/v2/chats/{chat_id}")
+
+        # Validate response structure
+        if "data" not in chat_data:
+            raise QwenAPIError(f"Missing 'data' field in chat response for chat_id={chat_id}")
+
+        messages = chat_data["data"]["chat"]["messages"]
+
+        assistant_message = messages[-1]
+        assert assistant_message["role"] == "assistant"
+
+        content = assistant_message["content_list"][0]
+
+        # Extract usage data (required)
+        usage = content["usage"]
+        usage_data = {
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        }
+
+        # Extract reasoning content if available (optional)
         reasoning_text = ""
-        finish_reason = "stop"
+        reasoning_content = assistant_message.get("reasoning_content")
+        if reasoning_content:
+            reasoning_text = reasoning_content
 
-        try:
-            with self._post(
-                f"/api/v2/chat/completions?chat_id={chat_id}",
-                payload,
-                stream=True,
-                headers={"x-accel-buffering": "no"},
-            ) as response:
-                for line in response.iter_lines(decode_unicode=True):
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        final_chunk = {
-                            "id": f"chatcmpl-{chat_id[:10]}",
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": model_name,
-                            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
-                        }
-                        yield f"data: {json.dumps(final_chunk)}\n\n"
-                        yield "data: [DONE]\n\n"
-                        break
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        logger.debug("Skipping malformed stream chunk: %s", data_str)
-                        continue
-
-                    choices = data.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta", {})
-                    phase = delta.get("phase")
-                    status = delta.get("status")
-                    content = delta.get("content", "")
-
-                    if phase == "think" and status != "finished":
-                        reasoning_text += content
-                    elif phase in {"answer", None} and content:
-                        assistant_content += content
-                        chunk = {
-                            "id": f"chatcmpl-{chat_id[:10]}",
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": model_name,
-                            "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-                        }
-                        if reasoning_text:
-                            chunk["choices"][0]["delta"]["reasoning_content"] = reasoning_text
-                            reasoning_text = ""
-                        yield f"data: {json.dumps(chunk)}\n\n"
-
-                    if status == "finished":
-                        finish_reason = delta.get("finish_reason", "stop")
-        except requests.exceptions.RequestException as exc:
-            logger.error("Streaming request failed: %s", exc)
-            error_chunk = {
-                "id": "chatcmpl-error",
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": f"Error during streaming: {exc}"},
-                        "finish_reason": "error",
-                    }
-                ],
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-        finally:
-            return
-
-    def _non_stream_chat(self, chat_id: str, model_name: str, payload: dict) -> dict:
-        response_text = ""
-        reasoning_text = ""
-        finish_reason = "stop"
-        usage_data = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
-        try:
-            with self._post(
-                f"/api/v2/chat/completions?chat_id={chat_id}",
-                payload,
-                stream=True,
-                headers={"x-accel-buffering": "no"},
-            ) as response:
-                for line in response.iter_lines(decode_unicode=True):
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        logger.debug("Skipping malformed stream chunk: %s", data_str)
-                        continue
-
-                    choices = data.get("choices") or []
-                    if not choices:
-                        continue
-
-                    delta = choices[0].get("delta", {})
-                    phase = delta.get("phase")
-                    status = delta.get("status")
-
-                    if phase == "think" and status != "finished":
-                        reasoning_text += delta.get("content", "")
-                    elif phase == "answer" and status != "finished":
-                        response_text += delta.get("content", "")
-
-                    if "usage" in data:
-                        usage = data["usage"]
-                        usage_data = {
-                            "prompt_tokens": usage.get("input_tokens", 0),
-                            "completion_tokens": usage.get("output_tokens", 0),
-                            "total_tokens": usage.get("total_tokens", 0),
-                        }
-
-                    if status == "finished":
-                        finish_reason = delta.get("finish_reason", "stop")
-        except requests.exceptions.RequestException as exc:
-            raise QwenAPIError(f"Chat completion failed: {exc}") from exc
-
+        # Build response payload
         response_payload = {
             "id": f"chatcmpl-{chat_id[:10]}",
             "object": "chat.completion",
@@ -583,8 +494,8 @@ class RequestManager:
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": response_text},
-                    "finish_reason": finish_reason,
+                    "message": {"role": "assistant", "content": content["content"]},
+                    "finish_reason": "stop",
                 }
             ],
             "usage": usage_data,
