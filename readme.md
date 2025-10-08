@@ -9,10 +9,10 @@ Features:
 
 ## Installation
 
-Install dependencies:
+Install directly via pip:
 
 ```bash
-pip install flask flask-cors requests
+pip install qwen-webapi
 ```
 
 The service reads configuration from environment variables:
@@ -32,12 +32,14 @@ For authentication, you can either set the `QWEN_AUTH_TOKEN` environment variabl
 4. input `localStorage.getItem("token")` and press Enter;
 5. copy the token (without quotes) and paste it into the `token.txt` file or set the `QWEN_AUTH_TOKEN` environment variable.
 
+> Notes: the token may expire in a few days. You can refresh it by repeating the steps above.
+
 ## Usage
 
 ### Run the server
 
 ```bash
-python -m qwen.server
+python -m qwen_webapi.server
 ```
 
 The app binds to `0.0.0.0:<PORT>` and exposes the following endpoints:
@@ -50,7 +52,7 @@ The app binds to `0.0.0.0:<PORT>` and exposes the following endpoints:
 ### Python API
 
 ```python
-from qwen import QwenApi
+from qwen_webapi import QwenApi
 
 messages = [{"role": "user", "content": "Hello, Qwen!"}]
 client = QwenApi("qwen-flash")
@@ -70,7 +72,7 @@ print(response)
 - `model` (str): Model name. The name mapping is defined in `qwen/config.py`, including:
   ```python
   DEFAULT_MODEL_MAP: dict[str, str] = {
-      "qwen": "qwen3-max",
+      "qwen": "qwen3-max", # default model
       "qwen-think": "qwen3-235b-a22b",  # 2507
       "qwen-coder": "qwen3-coder-plus",
       "qwen-flash": "qwen-plus-2025-09-11",  # next-80b-a3b

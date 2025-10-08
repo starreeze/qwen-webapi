@@ -12,6 +12,7 @@ license = { text = "GPL-3.0-only" }
 authors = [
     { name = "Starreeze" }
 ]
+url = "https://github.com/starreeze/qwen-webapi"
 keywords = ["qwen", "api", "proxy", "openai", "chat", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
